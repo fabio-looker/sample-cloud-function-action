@@ -1,0 +1,18 @@
+{
+  "name": "gcf-mock",
+  "version": "0.0.0",
+  "description": "A wrapper that has express, imports the action handler to mock GCF for quick development testing",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "setup-ssl": "mkdir -p secret && openssl genrsa -out secret/self-signed.pem 2048 && openssl req -new -key secret/self-signed.pem -out secret/self-signed.csr && openssl x509 -req -in secret/self-signed.csr -signkey secret/self-signed.pem -out secret/self-signed.cert",
+    "prep-self-signed-looker":"keytool -exportcert -alias looker.self.signed -storepass self.signed.pass -keystore ~/looker/.ssl/looker.self.signed.jks -rfc > ~/looker/.ssl/self-signed.crt.pem",
+    "start-dev":"export NODE_EXTRA_CA_CERTS=~/looker/.ssl/self-signed.crt.pem; nodemon --inspect index.js"
+  },
+  "author": "Fabio Beltramini",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "express": "^4.17.1",
+    "oboe": "^2.1.4"
+  }
+}
