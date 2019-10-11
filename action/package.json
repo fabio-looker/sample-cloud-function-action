@@ -1,0 +1,16 @@
+{
+  "name": "cs-app-internal",
+  "version": "0.0.0",
+  "description": "A simple connectivity test between GCF & BQ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://source.cloud.google.com/cs-app-internal/cs-app-internal"
+  },
+  "author": "Fabio Beltramini",
+  "license": "UNLICENSED",
+  "dependencies": {}
+}
