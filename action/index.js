@@ -1,3 +1,5 @@
+const crypto = require("crypto")
+
 const expectedAuthHeader = process.env.EXPECTED_LOOKER_SECRET_TOKEN
 	&& `Token token="${process.env.EXPECTED_LOOKER_SECRET_TOKEN}"`
 	
@@ -20,7 +22,7 @@ exports.httpHandler = async function httpHandler(req,res) {
 			throw {status:400, body:"Invalid request"}
 			}
 		if(route.auth && expectedAuthHeader
-			&& req.headers.authorization!==expectedAuthHeader){
+			&& !timingSafeEqual(req.headers.authorization,expectedAuthHeader)){
 			throw {status:401, body:"Authorization required"}
 			}
 		const resObj = await route.handler(req)
@@ -86,4 +88,17 @@ async function action0Execute (req){
 		throw {status:400, body:"Expected a POST request"}
 		}
 	return {}
+	}
+	
+function timingSafeEqual(a, b) {
+	if(typeof a !== "string"){throw "String required"}
+	if(typeof b !== "string"){throw "String required"}
+	var aLen = Buffer.byteLength(a)
+	var bLen = Buffer.byteLength(b)
+	const bufA = bufferAlloc(aLen, 0, 'utf8')
+	bufA.write(a)
+	const bufB = bufferAlloc(aLen, 0, 'utf8') //Yes, aLen
+	bufB.write(b)
+
+	return crypto.timingSafeEqual(bufA, bufB) && aLen === bLen;
 	}
