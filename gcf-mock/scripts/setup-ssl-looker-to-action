@@ -1,0 +1,35 @@
+#! /usr/bin/env bash
+
+CERT_ALIAS=${CERT_ALIAS:-"local-gcf-mock"}
+JAVA_HOME=${JAVA_HOME:-"/usr/lib/jvm/java-8-openjdk-amd64"}
+
+mkdir -p secret
+
+echo "This script will allow Looker to trust & invoke your Action server"
+echo ""
+echo "1. Generating a new certificate for your Action server"
+echo -e "   \033[1;33mWhen prompted for a Common Name, enter 'localhost' \033[0m (or whatever hostname you want your Action server to use)"
+echo ""
+
+mkdir -p secret && openssl genrsa -out secret/self-signed.pem 2048
+openssl req -new -key secret/self-signed.pem -out secret/self-signed.csr
+openssl x509 -days 3650 -req -in secret/self-signed.csr -signkey secret/self-signed.pem -out secret/self-signed.cert
+
+echo "The certificate should be saved in the 'secret' directory. Avoid sharing it"
+echo ""
+
+
+echo "2. Adding the certificate to the Java trust store. Trying with JAVA_HOME=$JAVA_HOME"
+echo ""
+echo "   Hint: 'Password' is your OS password, 'keystore password' (twice) is defaulted to 'changeit'"
+echo ""
+
+if [ "$(keytool -list -alias $CERT_ALIAS -keystore $JAVA_HOME/jre/lib/security/cacerts)" ]; then
+  sudo keytool -delete -alias $CERT_ALIAS -keystore $JAVA_HOME/jre/lib/security/cacerts;
+fi
+sudo keytool -import -alias $CERT_ALIAS -keystore $JAVA_HOME/jre/lib/security/cacerts -file secret/self-signed.cert
+
+echo "You should now restart both Looker and your Action server"
+echo "Ensure that Looker is started using the Java version available at $JAVA_HOME"
+
+exit 0

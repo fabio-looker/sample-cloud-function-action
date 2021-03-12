@@ -1,0 +1,17 @@
+#! /usr/bin/env bash
+
+
+echo "This script will allow your Action server to trust & invoke your local Looker"
+echo ""
+echo "Ensure that LOOKER_HOME is set to the location of your Looker install"
+echo "both before running this command, and before running 'npm run start-dev'"
+echo ""
+echo "Trying with LOOKER_HOME=$LOOKER_HOME"
+echo "You can ignore warnings about the keystore using a proprietary format"
+echo ""
+
+keytool -exportcert \
+  -alias looker.self.signed \
+  -storepass self.signed.pass \
+  -keystore $LOOKER_HOME/.ssl/looker.self.signed.jks -rfc \
+  > $LOOKER_HOME/.ssl/self-signed.crt.pem

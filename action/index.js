@@ -95,9 +95,9 @@ function timingSafeEqual(a, b) {
 	if(typeof b !== "string"){throw "String required"}
 	var aLen = Buffer.byteLength(a)
 	var bLen = Buffer.byteLength(b)
-	const bufA = bufferAlloc(aLen, 0, 'utf8')
+	const bufA = Buffer.allocUnsafe(aLen)
 	bufA.write(a)
-	const bufB = bufferAlloc(aLen, 0, 'utf8') //Yes, aLen
+	const bufB = Buffer.allocUnsafe(aLen) //Yes, aLen
 	bufB.write(b)
 
 	return crypto.timingSafeEqual(bufA, bufB) && aLen === bLen;
