@@ -7,8 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "setup-ssl-action-to-looker": "./scripts/setup-ssl-action-to-looker",
     "setup-ssl-looker-to-action": "./scripts/setup-ssl-looker-to-action",
-    "start-dev": "export NODE_EXTRA_CA_CERTS=$LOOKER_HOME/.ssl/self-signed.crt.pem; node index.js",
-    "start-dev-nodemon": "export NODE_EXTRA_CA_CERTS=$LOOKER_HOME/.ssl/self-signed.crt.pem; nodemon --inspect --watch .. index.js"
+    "start-dev": "export NODE_EXTRA_CA_CERTS=secret/looker-self-signed.crt.pem; node index.js",
+    "start-dev-nodemon": "export NODE_EXTRA_CA_CERTS=secret/looker-self-signed.crt.pem; nodemon --inspect --watch .. index.js"
   },
   "author": "Fabio Beltramini",
   "license": "UNLICENSED",

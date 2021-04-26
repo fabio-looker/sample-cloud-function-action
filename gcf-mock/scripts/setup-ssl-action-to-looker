@@ -1,5 +1,13 @@
 #! /usr/bin/env bash
 
+CURRENT_DIR=${PWD##*/} 
+
+if [ "$CURRENT_DIR" != "gcf-mock" ]; then
+  echo "This script should only be run from the gcf-mock folder"
+  exit 1
+fi
+
+LOOKER_HOME=${LOOKER_HOME:-"$HOME/looker"}
 
 echo "This script will allow your Action server to trust & invoke your local Looker"
 echo ""
@@ -10,8 +18,11 @@ echo "Trying with LOOKER_HOME=$LOOKER_HOME"
 echo "You can ignore warnings about the keystore using a proprietary format"
 echo ""
 
+
+mkdir -p secret
+
 keytool -exportcert \
   -alias looker.self.signed \
   -storepass self.signed.pass \
-  -keystore $LOOKER_HOME/.ssl/looker.self.signed.jks -rfc \
-  > $LOOKER_HOME/.ssl/self-signed.crt.pem
+  -keystore "$LOOKER_HOME/.ssl/looker.self.signed.jks" -rfc \
+  > ./secret/looker-self-signed.crt.pem

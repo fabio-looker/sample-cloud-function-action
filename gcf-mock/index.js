@@ -4,20 +4,21 @@ const path = require('path')
 const cloudFunctionPath = '/mock-app'
 const port = 8443
 Object.entries({
-		//PASSPHRASE: undefined,
+		// Since we're not actually in a GCF, using env variables is fine
+		SECRET_WARNING: "I realize GCF's environment variables aren't a secure place to store secrets, since anyone could read them there",
 		CALLBACK_URL_PREFIX: `https://localhost:${port}${cloudFunctionPath}`,
-		EXPECTED_LOOKER_SECRET_TOKEN:"some kinda secret string"
+		LOOKER_SECRET:"some kinda secret string"
 	}).forEach(([k,v]) => {
 		process.env[k] = process.env[k] || v
 	})
 
-const expectedToken = `Token token="${process.env.EXPECTED_LOOKER_SECRET_TOKEN}"`
+const expectedToken = `Token token="${process.env.LOOKER_SECRET}"`
 
 let httpsOptions
 try {
 	httpsOptions = {
-		key: fs.readFileSync(path.join(__dirname,'./secret/self-signed.pem')),
-		cert: fs.readFileSync(path.join(__dirname,'./secret/self-signed.cert')),
+		key: fs.readFileSync(path.join(__dirname,'./secret/action-self-signed.pem')),
+		cert: fs.readFileSync(path.join(__dirname,'./secret/action-self-signed.cert')),
 		//passphrase: process.env.PASSPHRASE
 		}
 	}

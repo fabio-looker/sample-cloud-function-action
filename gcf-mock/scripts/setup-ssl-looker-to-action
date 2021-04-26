@@ -1,5 +1,13 @@
 #! /usr/bin/env bash
 
+CURRENT_DIR=${PWD##*/} 
+
+if [ "$CURRENT_DIR" != "gcf-mock" ]; then
+  echo "This script should only be run from the gcf-mock folder"
+  exit 1
+fi
+
+
 CERT_ALIAS=${CERT_ALIAS:-"local-gcf-mock"}
 JAVA_HOME=${JAVA_HOME:-"/usr/lib/jvm/java-8-openjdk-amd64"}
 
@@ -11,9 +19,9 @@ echo "1. Generating a new certificate for your Action server"
 echo -e "   \033[1;33mWhen prompted for a Common Name, enter 'localhost' \033[0m (or whatever hostname you want your Action server to use)"
 echo ""
 
-mkdir -p secret && openssl genrsa -out secret/self-signed.pem 2048
-openssl req -new -key secret/self-signed.pem -out secret/self-signed.csr
-openssl x509 -days 3650 -req -in secret/self-signed.csr -signkey secret/self-signed.pem -out secret/self-signed.cert
+mkdir -p secret && openssl genrsa -out secret/action-self-signed.pem 2048
+openssl req -new -key secret/action-self-signed.pem -out secret/action-self-signed.csr
+openssl x509 -days 3650 -req -in secret/action-self-signed.csr -signkey secret/action-self-signed.pem -out secret/action-self-signed.cert
 
 echo "The certificate should be saved in the 'secret' directory. Avoid sharing it"
 echo ""
@@ -27,7 +35,7 @@ echo ""
 if [ "$(keytool -list -alias $CERT_ALIAS -keystore $JAVA_HOME/jre/lib/security/cacerts)" ]; then
   sudo keytool -delete -alias $CERT_ALIAS -keystore $JAVA_HOME/jre/lib/security/cacerts;
 fi
-sudo keytool -import -alias $CERT_ALIAS -keystore $JAVA_HOME/jre/lib/security/cacerts -file secret/self-signed.cert
+sudo keytool -import -alias $CERT_ALIAS -keystore $JAVA_HOME/jre/lib/security/cacerts -file secret/action-self-signed.cert
 
 echo "You should now restart both Looker and your Action server"
 echo "Ensure that Looker is started using the Java version available at $JAVA_HOME"
