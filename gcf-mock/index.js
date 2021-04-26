@@ -28,7 +28,7 @@ catch(e){
 	}
 	
 const express = require('express')
-const action = require('../action')
+const action = require('../action-examples/01-minimal')
 const https = require('https')
 const http = require('http')
 const oboe = require('oboe')

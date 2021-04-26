@@ -1,5 +1,5 @@
 {
-  "name": "gcf-action-sample",
+  "name": "sample-action-01",
   "version": "0.0.0",
   "description": "A sample Looker Action designed to run on GCF",
   "main": "index.js",
