@@ -1,16 +1,16 @@
 /*** Code Dependencies ***/
 const crypto = require("crypto")
+const {SecretManagerServiceClient} = require('@google-cloud/secret-manager')
+const secrets = new SecretManagerServiceClient()
 
 /*** Load & validate configs ***/
 const {
 	CALLBACK_URL_PREFIX,
-	SECRET_WARNING,
 	} = process.env
 const ASYNC_LOOKER_SECRET = getSecret("LOOKER_SECRET")
 
 warnIf(check_LOOKER_SECRET())
 warnIf(check_CALLBACK_URL_PREFIX())
-exitIf(check_SECRET_WARNING())
 
 /*** Entry-point for requests ***/
 exports.httpHandler = async function httpHandler(req,res) {
@@ -134,17 +134,16 @@ function routeNotFound() {
 	}
 
 /* Implementation for getting a secret */
+/*	This time we're using Secret Manager to store secrets
+	https://console.cloud.google.com/security/secret-manager
+	*/
 async function getSecret(name){
-	return env[name]
+	const project = await secrets.getProjectId()
+	const [secretVersion] = await secrets.accessSecretVersion({name: `projects/${project}/secrets/${name}/versions/latest`})
+	return secretVersion.payload.data.toString()
 	}
 
 /* Check definitions */
-function check_SECRET_WARNING(){
-	const acknowledgement = "I realize GCF's environment variables aren't a secure place to store secrets, since anyone could read them there" 
-	if(SECRET_WARNING !== acknowledgement){
-		return "Using env variables for secrets is not recommended. To do it anyway, use the UNSAFE_SECRETS env variable to acknowledge the risk."
-		}
-	}
 async function check_LOOKER_SECRET(){
 	const lookerSecret = await ASYNC_LOOKER_SECRET
 	if(!lookerSecret){
