@@ -1,38 +1,39 @@
 /*** Code Dependencies ***/
-const utils = require("../../utils")
+const crypto = require("crypto")
+const {SecretManagerServiceClient} = require('@google-cloud/secret-manager')
+const secrets = new SecretManagerServiceClient()
+const {BigQuery} = require('@google-cloud/bigquery')
+const bqTable = new BigQuery()
+	.dataset("my_dataset")
+	.table("my_table")
 
 /*** Load & validate configs ***/
 const {
 	CALLBACK_URL_PREFIX,
-	SECRET_WARNING,
 	} = process.env
 const ASYNC_LOOKER_SECRET = getSecret("LOOKER_SECRET")
 
-utils.warnIf(check_LOOKER_SECRET())
-utils.warnIf(check_CALLBACK_URL_PREFIX())
-utils.exitIf(check_SECRET_WARNING())
+warnIf(check_LOOKER_SECRET())
+warnIf(check_CALLBACK_URL_PREFIX())
 
 /*** Entry-point for requests ***/
 exports.httpHandler = async function httpHandler(req,res) {
 	const routes = {
 		"/": [hubListing],
 		"/action-0/form": [
-			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
+			requireInstanceAuth,
 			action0Form
 			], 
 		"/action-0/execute": [
-			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
-			utils.http.processRequestBody,
+			requireInstanceAuth,
+			processRequestBody,
 			action0Execute
 			],
 		"/status": [hubStatus] // Debugging endpoint
 		}
 	try {
-		const routeHandlerSequence = 
-			routes[req.path]
-			|| [utils.http.routeNotFound]
-		
-		for(let handler of routeHandlerSequence) {
+		const routeHandlers = routes[req.path] || [routeNotFound]
+		for(let handler of routeHandlers) {
 			let handlerResponse = await handler(req,res)
 			if (!handlerResponse) continue 
 			return res
@@ -50,6 +51,18 @@ exports.httpHandler = async function httpHandler(req,res) {
 
 
 /* Definitions for route handler functions */
+
+async function requireInstanceAuth(req) {
+	const lookerSecret = await ASYNC_LOOKER_SECRET
+	if(!lookerSecret){return}
+	const expectedAuthHeader = `Token token="${lookerSecret}"`
+	if(!timingSafeEqual(req.headers.authorization,expectedAuthHeader)){
+		return {
+			status:401,
+			body: {error: "Looker instance authentication is required"}
+		}
+	}
+}
 
 async function hubListing(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#actions-list-endpoint
@@ -89,7 +102,40 @@ async function action0Form(req,res){
 	}
 
 async function action0Execute (req){
-	return {}
+	//Some potentially useful values to use:
+	const invokedAt = BigQuery.timestamp(new Date())
+	const scheduledPlanId = req.body.scheduled_plan && req.body.scheduled_plan.scheduled_plan_id
+	const queryData = req.body.data //If using a standard "push" action
+
+	//const formParams = req.body.form_params
+	//const queryId = scheduledPlan.query_id
+
+	// Represent the row as a simple object using the column names in BQ (typically camel case)
+	const newRow = {
+		invoked_at: invokedAt,
+		scheduled_plan_id: scheduledPlanId,
+		query_result_size: queryData.length
+		}
+	const rowsToInsert = [newRow] // Wrap the single row in an array
+	try{
+		await bqTable.insert(rowsToInsert)
+		return {status: 200, body: {
+			looker:{
+				success:true,
+				message:`Inserted new row`
+				}
+			}}
+		}
+	catch(e){
+		console.error(e)
+		console.error(e.errors[0])
+		return {status:500, body:{
+			looker:{
+				success: false,
+				message: `An error occurred inserting new data into BigQuery. See GCF logs for more details.`
+				}
+			}}
+		}
 	}
 
 async function hubStatus(req){
@@ -119,19 +165,35 @@ async function hubStatus(req){
 		}
 	}
 
+async function processRequestBody(req){
+	if(req.method !== "POST"){
+		throw {status:400, body:"Expected a POST request"}
+		}
+	req.body = req.body || {}
+	req.body.attachment = req.body.attachment || {}
+	req.body.attachment.data = tryJsonParse(req.body.attachment.data) || req.body.attachment.data
+	req.state = tryJsonParse(req.body.data && req.body.data.state_json, {})
+	}
+
+function routeNotFound() {
+	return {
+		status:400,
+		type: "text",
+		body:"Invalid request"
+		}
+	}
 
 /* Implementation for getting a secret */
+/*	This time we're using Secret Manager to store secrets
+	https://console.cloud.google.com/security/secret-manager
+	*/
 async function getSecret(name){
-	return process.env[name]
+	const project = await secrets.getProjectId()
+	const [secretVersion] = await secrets.accessSecretVersion({name: `projects/${project}/secrets/${name}/versions/latest`})
+	return secretVersion.payload.data.toString()
 	}
 
 /* Check definitions */
-function check_SECRET_WARNING(){
-	const acknowledgement = "I realize GCF's environment variables aren't a secure place to store secrets, since anyone could read them there" 
-	if(SECRET_WARNING !== acknowledgement){
-		return "Using env variables for secrets is not recommended. To do it anyway, use the UNSAFE_SECRETS env variable to acknowledge the risk."
-		}
-	}
 async function check_LOOKER_SECRET(){
 	const lookerSecret = await ASYNC_LOOKER_SECRET
 	if(!lookerSecret){
@@ -142,4 +204,34 @@ function check_CALLBACK_URL_PREFIX(){
 	if (!CALLBACK_URL_PREFIX){
 		return "CALLBACK_URL_PREFIX is not defined"
 		}
+	}
+
+
+/* Helper functions */
+async function warnIf(strOrPromise){
+	let str = await strOrPromise
+	if(str){console.warn(`WARNING: ${str}`)}
+	}
+async function exitIf(strOrPromise){
+	let str = await strOrPromise
+	if(str){
+		console.error(str)
+		process.exit(1)
+		}
+	}
+function timingSafeEqual(a, b) {
+	if(typeof a !== "string"){throw "String required"}
+	if(typeof b !== "string"){throw "String required"}
+	var aLen = Buffer.byteLength(a)
+	var bLen = Buffer.byteLength(b)
+	const bufA = Buffer.allocUnsafe(aLen)
+	bufA.write(a)
+	const bufB = Buffer.allocUnsafe(aLen) //Yes, aLen
+	bufB.write(b)
+
+	return crypto.timingSafeEqual(bufA, bufB) && aLen === bLen;
+	}
+function tryJsonParse(str, dft) {
+	try{return JSON.parse(str)}
+	catch(e){return dft}
 	}

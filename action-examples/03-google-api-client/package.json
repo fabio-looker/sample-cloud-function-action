@@ -1,0 +1,19 @@
+{
+  "name": "sample-action-01",
+  "version": "0.0.0",
+  "description": "A sample Looker Action designed to run on GCF",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fabio-looker/sample-cloud-function-action"
+  },
+  "author": "Fabio Beltramini",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@google-cloud/bigquery": "^5.6.0",
+    "@google-cloud/secret-manager": "^3.6.0"
+  }
+}

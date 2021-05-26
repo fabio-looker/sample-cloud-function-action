@@ -1,10 +1,7 @@
-# Minimal Example
+# Secret Manager Example
 
-**Pros**
+This example demonstrates a best practice approach to keeping secrets externally.
 
-  - Does not require any NPM dependencies (easier to deploy in GCF UI)
+Unlike the minimal example, this example contains a code dependencies (defined in package.json), and also depends on the external Secret Manager service.
 
-**Cons**
-
-  - Does not demonstrate how to retrieve secrets from Google Cloud Storage or other permissioned product, and instead relies on entering secrets into an ENV variable which may be read by other admins with edit permissions to the function
-  - Does not demonstrate OAuth
+The code refers to a statically named secret, which you would manually register within Secret Manager ahead of time.
