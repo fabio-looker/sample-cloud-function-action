@@ -28,12 +28,11 @@ exports.httpHandler = async function httpHandler(req,res) {
 		"/status": [hubStatus] // Debugging endpoint
 		}
 	try {
-		const routeHandlerSequence = 
+		const routeHandlerSequence =
 			routes[req.path]
 			|| [utils.http.routeNotFound]
-		
 		for(let handler of routeHandlerSequence) {
-			let handlerResponse = await handler(req,res)
+			let handlerResponse = await handler(req)
 			if (!handlerResponse) continue 
 			return res
 				.status(handlerResponse.status || 200)
@@ -48,9 +47,7 @@ exports.httpHandler = async function httpHandler(req,res) {
 		}
 	}
 
-
-/* Definitions for route handler functions */
-
+/*** Definitions for route handler functions ***/
 async function hubListing(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#actions-list-endpoint
 	return {
@@ -75,7 +72,7 @@ async function hubListing(req){
 		}
 	}
 
-async function action0Form(req,res){
+async function action0Form(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#action-form-endpoint
 	return [
 		{name: "title", label: "Name"},
@@ -120,12 +117,12 @@ async function hubStatus(req){
 	}
 
 
-/* Implementation for getting a secret */
+/*** Implementation for getting a secret ***/
 async function getSecret(name){
 	return process.env[name]
 	}
 
-/* Check definitions */
+/*** Check definitions ***/
 function check_SECRET_WARNING(){
 	const acknowledgement = "I realize GCF's environment variables aren't a secure place to store secrets, since anyone could read them there" 
 	if(SECRET_WARNING !== acknowledgement){

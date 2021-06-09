@@ -1,5 +1,5 @@
 /*** Code Dependencies ***/
-const crypto = require("crypto")
+const utils = require("../../utils")
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager')
 const secrets = new SecretManagerServiceClient()
 
@@ -9,22 +9,30 @@ const {
 	} = process.env
 const ASYNC_LOOKER_SECRET = getSecret("LOOKER_SECRET")
 
-warnIf(check_LOOKER_SECRET())
-warnIf(check_CALLBACK_URL_PREFIX())
+utils.warnIf(check_LOOKER_SECRET())
+utils.warnIf(check_CALLBACK_URL_PREFIX())
 
 /*** Entry-point for requests ***/
 exports.httpHandler = async function httpHandler(req,res) {
 	const routes = {
 		"/": [hubListing],
-		"/action-0/form": [requireInstanceAuth, action0Form], 
-		"/action-0/execute": [requireInstanceAuth, action0Execute],
+		"/action-0/form": [
+			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
+			action0Form
+			], 
+		"/action-0/execute": [
+			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
+			utils.http.processRequestBody,
+			action0Execute
+			],
 		"/status": [hubStatus] // Debugging endpoint
 		}
 	try {
-		const routeHandlers = routes[req.path] || [routeNotFound]
-		req.state = tryJsonParse(req.body && req.body.data && req.body.data.state_json, {})
-		for(let handler of routeHandlers) {
-			let handlerResponse = await handler(req,res)
+		const routeHandlerSequence =
+			routes[req.path]
+			|| [utils.http.routeNotFound]
+		for(let handler of routeHandlerSequence) {
+			let handlerResponse = await handler(req)
 			if (!handlerResponse) continue 
 			return res
 				.status(handlerResponse.status || 200)
@@ -39,21 +47,7 @@ exports.httpHandler = async function httpHandler(req,res) {
 		}
 	}
 
-
-/* Definitions for route handler functions */
-
-async function requireInstanceAuth(req) {
-	const lookerSecret = await ASYNC_LOOKER_SECRET
-	if(!lookerSecret){return}
-	const expectedAuthHeader = `Token token="${lookerSecret}"`
-	if(!timingSafeEqual(req.headers.authorization,expectedAuthHeader)){
-		return {
-			status:401,
-			body: {error: "Looker instance authentication is required"}
-		}
-	}
-}
-
+/*** Definitions for route handler functions ***/
 async function hubListing(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#actions-list-endpoint
 	return {
@@ -78,7 +72,7 @@ async function hubListing(req){
 		}
 	}
 
-async function action0Form(req,res){
+async function action0Form(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#action-form-endpoint
 	return [
 		{name: "title", label: "Name"},
@@ -92,9 +86,6 @@ async function action0Form(req,res){
 	}
 
 async function action0Execute (req){
-	if(req.method !== "POST"){
-		throw {status:400, body:"Expected a POST request"}
-		}
 	return {}
 	}
 
@@ -125,16 +116,8 @@ async function hubStatus(req){
 		}
 	}
 
-function routeNotFound() {
-	return {
-		status:400,
-		type: "text",
-		body:"Invalid request"
-		}
-	}
-
-/* Implementation for getting a secret */
-/*	This time we're using Secret Manager to store secrets
+/*** Implementation for getting a secret ***/
+/*	We're using Secret Manager to store secrets
 	https://console.cloud.google.com/security/secret-manager
 	*/
 async function getSecret(name){
@@ -143,7 +126,7 @@ async function getSecret(name){
 	return secretVersion.payload.data.toString()
 	}
 
-/* Check definitions */
+/*** Check definitions ***/
 async function check_LOOKER_SECRET(){
 	const lookerSecret = await ASYNC_LOOKER_SECRET
 	if(!lookerSecret){
@@ -154,34 +137,4 @@ function check_CALLBACK_URL_PREFIX(){
 	if (!CALLBACK_URL_PREFIX){
 		return "CALLBACK_URL_PREFIX is not defined"
 		}
-	}
-
-
-/* Helper functions */
-async function warnIf(strOrPromise){
-	let str = await strOrPromise
-	if(str){console.warn(`WARNING: ${str}`)}
-	}
-async function exitIf(strOrPromise){
-	let str = await strOrPromise
-	if(str){
-		console.error(str)
-		process.exit(1)
-		}
-	}
-function timingSafeEqual(a, b) {
-	if(typeof a !== "string"){throw "String required"}
-	if(typeof b !== "string"){throw "String required"}
-	var aLen = Buffer.byteLength(a)
-	var bLen = Buffer.byteLength(b)
-	const bufA = Buffer.allocUnsafe(aLen)
-	bufA.write(a)
-	const bufB = Buffer.allocUnsafe(aLen) //Yes, aLen
-	bufB.write(b)
-
-	return crypto.timingSafeEqual(bufA, bufB) && aLen === bLen;
-	}
-function tryJsonParse(str, dft) {
-	try{return JSON.parse(str)}
-	catch(e){return dft}
 	}

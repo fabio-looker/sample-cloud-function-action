@@ -1,5 +1,5 @@
 /*** Code Dependencies ***/
-const crypto = require("crypto")
+const utils = require("../../utils")
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager')
 const secrets = new SecretManagerServiceClient()
 const {BigQuery} = require('@google-cloud/bigquery')
@@ -13,28 +13,30 @@ const {
 	} = process.env
 const ASYNC_LOOKER_SECRET = getSecret("LOOKER_SECRET")
 
-warnIf(check_LOOKER_SECRET())
-warnIf(check_CALLBACK_URL_PREFIX())
+utils.warnIf(check_LOOKER_SECRET())
+utils.warnIf(check_CALLBACK_URL_PREFIX())
 
 /*** Entry-point for requests ***/
 exports.httpHandler = async function httpHandler(req,res) {
 	const routes = {
 		"/": [hubListing],
 		"/action-0/form": [
-			requireInstanceAuth,
+			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
 			action0Form
 			], 
 		"/action-0/execute": [
-			requireInstanceAuth,
-			processRequestBody,
+			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
+			utils.http.processRequestBody,
 			action0Execute
 			],
 		"/status": [hubStatus] // Debugging endpoint
 		}
 	try {
-		const routeHandlers = routes[req.path] || [routeNotFound]
-		for(let handler of routeHandlers) {
-			let handlerResponse = await handler(req,res)
+		const routeHandlerSequence =
+			routes[req.path]
+			|| [utils.http.routeNotFound]
+		for(let handler of routeHandlerSequence) {
+			let handlerResponse = await handler(req)
 			if (!handlerResponse) continue 
 			return res
 				.status(handlerResponse.status || 200)
@@ -49,21 +51,7 @@ exports.httpHandler = async function httpHandler(req,res) {
 		}
 	}
 
-
-/* Definitions for route handler functions */
-
-async function requireInstanceAuth(req) {
-	const lookerSecret = await ASYNC_LOOKER_SECRET
-	if(!lookerSecret){return}
-	const expectedAuthHeader = `Token token="${lookerSecret}"`
-	if(!timingSafeEqual(req.headers.authorization,expectedAuthHeader)){
-		return {
-			status:401,
-			body: {error: "Looker instance authentication is required"}
-		}
-	}
-}
-
+/*** Definitions for route handler functions ***/
 async function hubListing(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#actions-list-endpoint
 	return {
@@ -88,7 +76,7 @@ async function hubListing(req){
 		}
 	}
 
-async function action0Form(req,res){
+async function action0Form(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#action-form-endpoint
 	return [
 		{name: "title", label: "Name"},
@@ -102,21 +90,23 @@ async function action0Form(req,res){
 	}
 
 async function action0Execute (req){
-	//Some potentially useful values to use:
+	// Our action will insert a new row into our pre-determined BQ Table
+
+	// Some data that we will insert
 	const invokedAt = BigQuery.timestamp(new Date())
 	const scheduledPlanId = req.body.scheduled_plan && req.body.scheduled_plan.scheduled_plan_id
 	const queryData = req.body.data //If using a standard "push" action
 
-	//const formParams = req.body.form_params
-	//const queryId = scheduledPlan.query_id
-
 	// Represent the row as a simple object using the column names in BQ (typically camel case)
 	const newRow = {
 		invoked_at: invokedAt,
-		scheduled_plan_id: scheduledPlanId,
+		scheduled_plan_id: scheduledPlanId || null,
 		query_result_size: queryData.length
 		}
-	const rowsToInsert = [newRow] // Wrap the single row in an array
+
+	// The API expects an array of rows, so wrap the single row in an array
+	const rowsToInsert = [newRow]
+
 	try{
 		await bqTable.insert(rowsToInsert)
 		return {status: 200, body: {
@@ -128,7 +118,7 @@ async function action0Execute (req){
 		}
 	catch(e){
 		console.error(e)
-		console.error(e.errors[0])
+		console.error(e && e.errors && e.errors[0])
 		return {status:500, body:{
 			looker:{
 				success: false,
@@ -139,10 +129,24 @@ async function action0Execute (req){
 	}
 
 async function hubStatus(req){
+	const timeoutInSeconds = 5
+	const asyncTimeout = new Promise((resolve,reject)=>setTimeout(
+		reject,
+		timeoutInSeconds*1000,
+		`Downstream service timed out (${timeoutInSeconds}s)`
+		))
+	const asyncLookerSecretStatus = check_LOOKER_SECRET()
+	const asyncBigQueryStatus = getBqStatus(bqTable)
+	const asyncSecretManagerStatus = getSmStatus(secrets)
+	const [lookerSecretStatus,bigQuery,secretManager] = await Promise.all([
+		Promise.race([asyncTimeout, asyncLookerSecretStatus]).catch(err => err.message || err),
+		Promise.race([asyncTimeout, asyncBigQueryStatus]).catch(err => err.message || err),
+		Promise.race([asyncTimeout, asyncSecretManagerStatus]).catch(err => err.message || err)
+		])
 	return {
 		validation: {
-			callbackUrlPrefix: await check_CALLBACK_URL_PREFIX() || "ok",
-			lookerSecret: await check_LOOKER_SECRET() || "ok"
+			callbackUrlPrefix: check_CALLBACK_URL_PREFIX() || "ok",
+			lookerSecret: lookerSecretStatus || "ok"
 			},
 		configuration: {
 			callbackUrlPrefix: process.env.CALLBACK_URL_PREFIX,
@@ -154,6 +158,8 @@ async function hubStatus(req){
 			PORT: process.env.PORT
 			},
 		services: {
+			bigQuery,
+			secretManager
 			},
 		received: {
 			method: req.method,
@@ -165,26 +171,8 @@ async function hubStatus(req){
 		}
 	}
 
-async function processRequestBody(req){
-	if(req.method !== "POST"){
-		throw {status:400, body:"Expected a POST request"}
-		}
-	req.body = req.body || {}
-	req.body.attachment = req.body.attachment || {}
-	req.body.attachment.data = tryJsonParse(req.body.attachment.data) || req.body.attachment.data
-	req.state = tryJsonParse(req.body.data && req.body.data.state_json, {})
-	}
-
-function routeNotFound() {
-	return {
-		status:400,
-		type: "text",
-		body:"Invalid request"
-		}
-	}
-
-/* Implementation for getting a secret */
-/*	This time we're using Secret Manager to store secrets
+/*** Implementation for getting a secret ***/
+/*	We're using Secret Manager to store secrets
 	https://console.cloud.google.com/security/secret-manager
 	*/
 async function getSecret(name){
@@ -193,7 +181,7 @@ async function getSecret(name){
 	return secretVersion.payload.data.toString()
 	}
 
-/* Check definitions */
+/*** Check definitions ***/
 async function check_LOOKER_SECRET(){
 	const lookerSecret = await ASYNC_LOOKER_SECRET
 	if(!lookerSecret){
@@ -206,32 +194,21 @@ function check_CALLBACK_URL_PREFIX(){
 		}
 	}
 
-
-/* Helper functions */
-async function warnIf(strOrPromise){
-	let str = await strOrPromise
-	if(str){console.warn(`WARNING: ${str}`)}
-	}
-async function exitIf(strOrPromise){
-	let str = await strOrPromise
-	if(str){
-		console.error(str)
-		process.exit(1)
+async function getBqStatus(bqTable) {
+	try{
+		const meta = await bqTable.getMetadata()
+		if(!meta){
+			return "BigQuery table.getMetadata failed"
+			}
+		const filtered = meta.map(m => ({
+			kind: m.kind,
+			id: m.id,
+			etag: m.etag
+			}))
+		return filtered
 		}
-	}
-function timingSafeEqual(a, b) {
-	if(typeof a !== "string"){throw "String required"}
-	if(typeof b !== "string"){throw "String required"}
-	var aLen = Buffer.byteLength(a)
-	var bLen = Buffer.byteLength(b)
-	const bufA = Buffer.allocUnsafe(aLen)
-	bufA.write(a)
-	const bufB = Buffer.allocUnsafe(aLen) //Yes, aLen
-	bufB.write(b)
-
-	return crypto.timingSafeEqual(bufA, bufB) && aLen === bLen;
-	}
-function tryJsonParse(str, dft) {
-	try{return JSON.parse(str)}
-	catch(e){return dft}
+	catch(e){
+		console.error(`BQ issue occurred during status check: ${e && e.message || e}`)
+		return "Error connecting to BQ. See logs for details"
+		}
 	}
