@@ -1,53 +1,53 @@
+/*** Demo constants */
+const projectId = "your-project-id"
+const datasetId = "demo_dataset"
+const tableId = "demo_table"
+
 /*** Code Dependencies ***/
-const utils = require("../../utils")
+const crypto = require("crypto")
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager')
 const secrets = new SecretManagerServiceClient()
-const {BigQuery} = require('@google-cloud/bigquery')
-const bqTable = new BigQuery()
-	.dataset("my_dataset")
-	.table("my_table")
+const BigqueryStorage = require('@google-cloud/bigquery-storage')
+const BQSManagedWriter = BigqueryStorage.managedwriter
 
 /*** Load & validate configs ***/
 const {
 	CALLBACK_URL_PREFIX,
 	} = process.env
-const ASYNC_LOOKER_SECRET = getSecret("LOOKER_SECRET")
+let cachedLookerSecret
 
-utils.warnIf(check_LOOKER_SECRET())
-utils.warnIf(check_CALLBACK_URL_PREFIX())
+warnIf(check_CALLBACK_URL_PREFIX())
+warnIf(check_LOOKER_SECRET())
 
 /*** Entry-point for requests ***/
 exports.httpHandler = async function httpHandler(req,res) {
 	const routes = {
 		"/": [hubListing],
+		"/status": [hubStatus], // Debugging endpoint. Not required.
 		"/action-0/form": [
-			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
+			requireInstanceAuth,
 			action0Form
 			], 
 		"/action-0/execute": [
-			utils.http.requireInstanceAuth(ASYNC_LOOKER_SECRET),
-			utils.http.processRequestBody,
+			requireInstanceAuth,
+			processRequestBody,
 			action0Execute
-			],
-		"/status": [hubStatus] // Debugging endpoint
+			]
 		}
+	
 	try {
-		const routeHandlerSequence =
-			routes[req.path]
-			|| [utils.http.routeNotFound]
+		const routeHandlerSequence = routes[req.path] || [routeNotFound]
 		for(let handler of routeHandlerSequence) {
 			let handlerResponse = await handler(req)
 			if (!handlerResponse) continue 
 			return res
 				.status(handlerResponse.status || 200)
-				.type(handlerResponse.type || 'json')
-				.set(handlerResponse.headers || {})
-				.send(handlerResponse.body || handlerResponse)
+				.json(handlerResponse.body || handlerResponse)
 			}
 		}
 	catch(err) {
 		console.error(err)
-		res.status(500).json("Unexpected error")
+		res.status(500).json("Unhandled error. See GCP Logs for details.")
 		}
 	}
 
@@ -57,8 +57,8 @@ async function hubListing(req){
 	return {
 		integrations: [
 			{
-				name: "mock-app",
-				label: "Mock App",
+				name: "demo-bq-insert",
+				label: "Demo BQ Insert",
 				supported_action_types: ["cell", "query", "dashboard"],
 				form_url:`${process.env.CALLBACK_URL_PREFIX}/action-0/form`,
 				url: `${process.env.CALLBACK_URL_PREFIX}/action-0/execute`,
@@ -66,10 +66,14 @@ async function hubListing(req){
 				supported_formats:["inline_json"],
 				supported_formattings:["unformatted"],
 				required_fields:[
+					// You can use this to make your action available for specific queries/fields
 					//{tag:"user_id"}
 					],
 				params: [
-
+					// You can use this to require parameters, either from the Action's administrative configuration,
+					// or from the invoking user's user attributes. A common use case might be to have the Looker
+					// instance pass along the user's identification to allow you to conditionally authorize the action:
+					{name: "email", label: "Email", user_attribute_name: "email", required: true}
 					]
 				}
 			]
@@ -77,54 +81,104 @@ async function hubListing(req){
 	}
 
 async function action0Form(req){
+	// The `form` response defines what information, if any, will be prompted from the user invoking/scheduling the Action
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#action-form-endpoint
 	return [
-		{name: "title", label: "Name"},
-		{name: "descr", label: "Description", type: "textarea"},
-		{name: "value", label: "Value", default:"100"},
-		{name: "mode",  label: "Mode", type:"select", options:[
+		{name: "choice",  label: "Choose", type:"select", options:[
 			{name:"Yes", label:"Yes"},
-			{name:"No", label:"No"}
-			]}
+			{name:"No", label:"No"},
+			{name:"Maybe", label:"Maybe"}
+			]},
+		{name: "note", label: "Note", type: "textarea"}
 		]
 	}
 
 async function action0Execute (req){
 	// Our action will insert a new row into our pre-determined BQ Table
-
-	// Some data that we will insert
-	const invokedAt = BigQuery.timestamp(new Date())
-	const scheduledPlanId = req.body.scheduled_plan && req.body.scheduled_plan.scheduled_plan_id
-	const queryData = req.body.data //If using a standard "push" action
-
-	// Represent the row as a simple object using the column names in BQ (typically camel case)
-	const newRow = {
-		invoked_at: invokedAt,
-		scheduled_plan_id: scheduledPlanId || null,
-		query_result_size: queryData.length
-		}
-
-	// The API expects an array of rows, so wrap the single row in an array
-	const rowsToInsert = [newRow]
-
 	try{
-		await bqTable.insert(rowsToInsert)
+		// Prepare some data that we will insert
+		const scheduledPlanId = req.body.scheduled_plan && req.body.scheduled_plan.scheduled_plan_id
+		const formParams = req.body.form_params || {}
+		const actionParams = req.body.data || {}
+		const queryData = req.body.attachment.data //If using a standard "push" action
+
+
+		// In case any fields require datatype-specific preparation, check this example:
+		// https://github.com/googleapis/nodejs-bigquery-storage/blob/main/samples/append_rows_proto2.js
+
+		const newRow = {
+			invoked_at: new Date(),
+			invoked_by: actionParams.email,
+			scheduled_plan_id: scheduledPlanId || null,
+			query_result_size: queryData.length,
+			choice: formParams.choice,
+			note: formParams.note,
+			}
+		await bigqueryConnectAndAppend(newRow)
+
 		return {status: 200, body: {
 			looker:{
 				success:true,
+				refresh_query: true, // Useful with "cell"-type actions
 				message:`Inserted new row`
 				}
 			}}
 		}
-	catch(e){
+	catch (e) {
 		console.error(e)
-		console.error(e && e.errors && e.errors[0])
 		return {status:500, body:{
 			looker:{
 				success: false,
-				message: `An error occurred inserting new data into BigQuery. See GCF logs for more details.`
+				message: `An unhandled error occurred inserting new data into BigQuery. See GCP logs for more details.`
 				}
 			}}
+		}
+	}
+
+
+async function bigqueryConnectAndAppend(row){
+	// The logic/sequence of steps to connect and write to a table is a bit long, so we encapsulte
+	// it here to be able to use it consistently both in our execute route and in our status route.
+	// Following the same steps as documented at https://cloud.google.com/bigquery/docs/write-api-streaming
+	
+	let writerClient
+	try{
+		const destinationTablePath = `projects/${projectId}/datasets/${datasetId}/tables/${tableId}`
+		const streamId = `${destinationTablePath}/streams/_default`
+		writerClient = new BQSManagedWriter.WriterClient({projectId})
+		const writeMetadata = await writerClient.getWriteStream({
+			streamId,
+			view: 'FULL',
+			})
+		const protoDescriptor = BigqueryStorage.adapt.convertStorageSchemaToProto2Descriptor(
+			writeMetadata.tableSchema,
+			'root'
+			)
+		const connection = await writerClient.createStreamConnection({
+			streamId,
+			destinationTablePath,
+			})
+		const writer = new BQSManagedWriter.JSONWriter({
+			streamId,
+			connection,
+			protoDescriptor,
+			})
+
+		let result
+		if(row){
+			// The API expects an array of rows, so wrap the single row in an array
+			const rowsToAppend = [row]
+			result = await writer.appendRows(rowsToAppend).getResult()
+			}
+		return {
+			streamId: connection.getStreamId(),
+			protoDescriptor,
+			result
+			}
+		}
+	catch (e) {throw e}
+	finally{
+		if(writerClient){writerClient.close()}
 		}
 	}
 
@@ -136,12 +190,10 @@ async function hubStatus(req){
 		`Downstream service timed out (${timeoutInSeconds}s)`
 		))
 	const asyncLookerSecretStatus = check_LOOKER_SECRET()
-	const asyncBigQueryStatus = getBqStatus(bqTable)
-	const asyncSecretManagerStatus = getSmStatus(secrets)
-	const [lookerSecretStatus,bigQuery,secretManager] = await Promise.all([
+	const asyncBigQueryStatus = getBqStatus()
+	const [lookerSecretStatus,bigQuery] = await Promise.all([
 		Promise.race([asyncTimeout, asyncLookerSecretStatus]).catch(err => err.message || err),
-		Promise.race([asyncTimeout, asyncBigQueryStatus]).catch(err => err.message || err),
-		Promise.race([asyncTimeout, asyncSecretManagerStatus]).catch(err => err.message || err)
+		Promise.race([asyncTimeout, asyncBigQueryStatus]).catch(err => err.message || err)
 		])
 	return {
 		validation: {
@@ -149,7 +201,7 @@ async function hubStatus(req){
 			lookerSecret: lookerSecretStatus || "ok"
 			},
 		configuration: {
-			callbackUrlPrefix: process.env.CALLBACK_URL_PREFIX,
+			callbackUrlPrefix: CALLBACK_URL_PREFIX,
 			},
 		function: {
 			FUNCTION_TARGET: process.env.FUNCTION_TARGET,
@@ -158,34 +210,44 @@ async function hubStatus(req){
 			PORT: process.env.PORT
 			},
 		services: {
-			bigQuery,
-			secretManager
+			bigQuery
 			},
 		received: {
-			method: req.method,
-			path: req.path,
-			query: req.query,
-			headers: req.headers,
-			body: req.body
+			method: req && req.method,
+			path: req && req.path,
+			query: req && req.query,
+			headers: req && req.headers,
+			body: req && req.body
 			}
 		}
 	}
 
-/*** Implementation for getting a secret ***/
-/*	We're using Secret Manager to store secrets
-	https://console.cloud.google.com/security/secret-manager
-	*/
-async function getSecret(name){
+async function getLookerSecret(){
+	/*** Implementation for getting a secret ***/
+	/*	We're using Secret Manager: https://console.cloud.google.com/security/secret-manager
+		Below is a somewhat manual way to do this for demo purposes, however a more convenient approach
+		may be to use Cloud Run Functions' built-in functionality to retrieve a secret for you during 
+		its spin-up: https://cloud.google.com/functions/docs/configuring/secrets#environment_variables
+		*/
+	if(cachedLookerSecret){return cachedLookerSecret}
 	const project = await secrets.getProjectId()
+	const name = "LOOKER_SECRET"
 	const [secretVersion] = await secrets.accessSecretVersion({name: `projects/${project}/secrets/${name}/versions/latest`})
-	return secretVersion.payload.data.toString()
+	cachedLookerSecret = secretVersion.payload.data.toString()
+	return cachedLookerSecret
 	}
 
 /*** Check definitions ***/
 async function check_LOOKER_SECRET(){
-	const lookerSecret = await ASYNC_LOOKER_SECRET
-	if(!lookerSecret){
-		return "Function is not requiring authentication. Provide a LOOKER_SECRET to require authentication"
+	try{
+		const lookerSecret = await getLookerSecret()
+		if(!lookerSecret){
+			return "Function is not requiring authentication. Provide a LOOKER_SECRET value to require authentication"
+			}
+		}
+	catch(e){
+		console.error(e)
+		return "Unable to connect to Secret Manager to retrieve LOOKER_SECRET. See logs for details."
 		}
 	}
 function check_CALLBACK_URL_PREFIX(){
@@ -194,21 +256,77 @@ function check_CALLBACK_URL_PREFIX(){
 		}
 	}
 
-async function getBqStatus(bqTable) {
+async function getBqStatus() {
 	try{
-		const meta = await bqTable.getMetadata()
-		if(!meta){
-			return "BigQuery table.getMetadata failed"
+		const {streamId, protoDescriptor} = await bigqueryConnectAndAppend()
+		return {
+			status: 'ok',
+			streamId,
+			protoDescriptor
 			}
-		const filtered = meta.map(m => ({
-			kind: m.kind,
-			id: m.id,
-			etag: m.etag
-			}))
-		return filtered
 		}
 	catch(e){
-		console.error(`BQ issue occurred during status check: ${e && e.message || e}`)
+		console.error('BQ Status check error', e)
 		return "Error connecting to BQ. See logs for details"
 		}
 	}
+
+async function warnIf(strOrPromise){
+	let str = await strOrPromise
+	if(str){console.warn(`WARNING: ${str}`)}
+	}
+
+/* Http "middleware" */
+async function processRequestBody(req){
+	req.body = req.body || {}
+	req.body.attachment = req.body.attachment || {}
+
+	//If inline_json format, pre-parse the attachment data
+	req.body.attachment.data = tryJsonParse(req.body.attachment.data) || req.body.attachment.data
+	
+	//If req has state, pre-parse the state_json
+	let state = tryJsonParse(req.body.data && req.body.data.state_json, {})
+	if(state){
+		delete req.body.data.state_json
+		req.body.data.state = state
+		}
+	
+	function tryJsonParse(str, dft) {
+		try{return JSON.parse(str)}
+		catch(e){return dft}
+		}
+	}
+
+async function requireInstanceAuth(req) {
+	const lookerSecret = await getLookerSecret()
+	if(!lookerSecret){return}
+	const expectedAuthHeader = `Token token="${lookerSecret}"`
+	if(!timingSafeEqual(req.headers.authorization,expectedAuthHeader)){
+		return {
+			status:401,
+			body: {error: "Looker instance authentication is required"}
+			}
+		}
+	return
+
+	function timingSafeEqual(a, b) {
+		if(typeof a !== "string"){return}
+		if(typeof b !== "string"){return}
+		var aLen = Buffer.byteLength(a)
+		var bLen = Buffer.byteLength(b)
+		const bufA = Buffer.allocUnsafe(aLen)
+		bufA.write(a)
+		const bufB = Buffer.allocUnsafe(aLen) //Yes, aLen
+		bufB.write(b)
+
+		return crypto.timingSafeEqual(bufA, bufB) && aLen === bLen;
+		}
+	}
+
+function routeNotFound() {
+	return {
+		status:400,
+		body: "Invalid request"
+		}
+	}
+	

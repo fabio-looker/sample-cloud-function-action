@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@google-cloud/bigquery": "^7.9.1",
+    "@google-cloud/secret-manager": "^5.6.0"
+  }
+}
