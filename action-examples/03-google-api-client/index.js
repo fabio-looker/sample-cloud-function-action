@@ -137,7 +137,7 @@ async function action0Execute (req){
 
 
 async function bigqueryConnectAndAppend(row){
-	// The logic/sequence of steps to connect and write to a table is a bit long, so we encapsulte
+	// The logic/sequence of steps to connect and write to a table is a bit long, so we encapsulate
 	// it here to be able to use it consistently both in our execute route and in our status route.
 	// Following the same steps as documented at https://cloud.google.com/bigquery/docs/write-api-streaming
 	
