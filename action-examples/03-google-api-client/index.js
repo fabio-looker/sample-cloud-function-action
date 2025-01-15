@@ -47,7 +47,7 @@ exports.httpHandler = async function httpHandler(req,res) {
 		}
 	catch(err) {
 		console.error(err)
-		res.status(500).json("Unhandled error. See GCP Logs for details.")
+		res.status(500).json("Unhandled error. See logs for details.")
 		}
 	}
 
@@ -58,7 +58,7 @@ async function hubListing(req){
 		integrations: [
 			{
 				name: "demo-bq-insert",
-				label: "Demo BQ Insert",
+				label: "Demo BigQuery Insert",
 				supported_action_types: ["cell", "query", "dashboard"],
 				form_url:`${process.env.CALLBACK_URL_PREFIX}/action-0/form`,
 				url: `${process.env.CALLBACK_URL_PREFIX}/action-0/execute`,
@@ -94,7 +94,7 @@ async function action0Form(req){
 	}
 
 async function action0Execute (req){
-	// Our action will insert a new row into our pre-determined BQ Table
+	// Our action will insert a new row into our pre-determined BigQuery Table
 	try{
 		// Prepare some data that we will insert
 		const scheduledPlanId = req.body.scheduled_plan && req.body.scheduled_plan.scheduled_plan_id
@@ -129,7 +129,7 @@ async function action0Execute (req){
 		return {status:500, body:{
 			looker:{
 				success: false,
-				message: `An unhandled error occurred inserting new data into BigQuery. See GCP logs for more details.`
+				message: `An unhandled error occurred inserting new data into BigQuery. See logs for more details.`
 				}
 			}}
 		}
@@ -266,8 +266,8 @@ async function getBqStatus() {
 			}
 		}
 	catch(e){
-		console.error('BQ Status check error', e)
-		return "Error connecting to BQ. See logs for details"
+		console.error('BigQuery status check error', e)
+		return "Error connecting to BigQuery. See logs for details"
 		}
 	}
 
