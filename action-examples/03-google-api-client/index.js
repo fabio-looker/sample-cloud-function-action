@@ -55,6 +55,7 @@ exports.httpHandler = async function httpHandler(req,res) {
 async function hubListing(req){
 	// https://github.com/looker/actions/blob/master/docs/action_api.md#actions-list-endpoint
 	return {
+		label: "Demo Action Hub",
 		integrations: [
 			{
 				name: "demo-bq-insert",
